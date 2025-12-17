@@ -1,0 +1,181 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "Init vars",
+  "States": {
+    "Init vars": {
+      "Type": "Pass",
+      "Next": "Get Auciton info",
+      "Output": {
+        "message": "initalize variable"
+      },
+      "Assign": {
+        "auctionId": "{% $states.input.auctionId %}"
+      }
+    },
+    "Get Auciton info": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:getItem",
+      "Arguments": {
+        "TableName": "HW10-Auctions",
+        "Key": {
+          "auctionId": {
+            "S": "{% $auctionId %}"
+          }
+        }
+      },
+      "Output": {
+        "message": "Auction retrieved successfully",
+        "auctionStatus": "{% $states.result.Item.auctionStatus.S %}",
+        "reserve": "{% $states.result.Item.reserve.N %}"
+      },
+      "Assign": {
+        "auctionStatus": "{% $states.result.Item.auctionStatus.S %}",
+        "reserve": "{% $states.result.Item.reserve.N %}"
+      },
+      "Next": "Is auction open?"
+    },
+    "Is auction open?": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Next": "Get Highest Bid info",
+          "Condition": "{% $auctionStatus = \"open\" %}",
+          "Output": {
+            "message": "auction is open, proceeding to close it"
+          }
+        }
+      ],
+      "Default": "Auction is already closed"
+    },
+    "Auction is already closed": {
+      "Type": "Fail",
+      "Cause": "Auction is already closed "
+    },
+    "Get Highest Bid info": {
+      "Type": "Task",
+      "Arguments": {
+        "TableName": "HW10-Bids",
+        "KeyConditionExpression": "auctionId = :a",
+        "ExpressionAttributeValues": {
+          ":a": {
+            "S": "{% $auctionId %}"
+          }
+        },
+        "ScanIndexForward": false
+      },
+      "Resource": "arn:aws:states:::aws-sdk:dynamodb:query",
+      "Output": {
+        "bids": "{% $states.result.Items[].bidAmt.N.$ %}",
+        "maxNumBid": "{% $number($states.result.Items[0].bidAmt.N)  %}",
+        "maxBid": "{% $string($states.result.Items[0].bidAmt.N) %}",
+        "bidAmt": "{%  $states.result.Items[0].bidAmt.N %}",
+        "userId": "{%  $states.result.Items[0].userId.S %}",
+        "date": "{%  $states.result.Items[0].date.S %}"
+      },
+      "Assign": {
+        "bids": "{% $states.result.Items[].bidAmt.N.$ %}",
+        "maxNumBid": "{% $number($states.result.Items[0].bidAmt.N)  %}",
+        "maxBid": "{% $string($states.result.Items[0].bidAmt.N) %}",
+        "bidAmt": "{%  $states.result.Items[0].bidAmt.N %}",
+        "winningUserId": "{%  $states.result.Items[0].userId.S %}",
+        "date": "{%  $states.result.Items[0].date.S %}"
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.QueryEvaluationError"
+          ],
+          "Comment": "if the query is empty meaning no bids",
+          "Output": {
+            "message": "auction is closing with no bids"
+          },
+          "Assign": {
+            "auctionStatus": "closed",
+            "winningUserId": "None",
+            "maxBid": "0"
+          },
+          "Next": "Update the auction to closed"
+        }
+      ],
+      "Next": "Update the auction to closed"
+    },
+    "Update the auction to closed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Arguments": {
+        "TableName": "HW10-Auctions",
+        "Key": {
+          "auctionId": {
+            "S": "{% $auctionId %}"
+          }
+        },
+        "UpdateExpression": "SET auctionStatus = :myValueRef",
+        "ExpressionAttributeValues": {
+          ":myValueRef": {
+            "S": "closed"
+          }
+        }
+      },
+      "Output": {
+        "message": "auction successfully closed"
+      },
+      "Next": "Update the auction Winning ID"
+    },
+    "Update the auction Winning ID": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Arguments": {
+        "TableName": "HW10-Auctions",
+        "Key": {
+          "auctionId": {
+            "S": "{% $auctionId %}"
+          }
+        },
+        "UpdateExpression": "SET winningUserId = :myValueRef",
+        "ExpressionAttributeValues": {
+          ":myValueRef": {
+            "S": "{% $winningUserId %}"
+          }
+        }
+      },
+      "Output": {
+        "message": "auction ID closed"
+      },
+      "Next": "Update the auction reserve"
+    },
+    "Update the auction reserve": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Arguments": {
+        "TableName": "HW10-Auctions",
+        "Key": {
+          "auctionId": {
+            "S": "{% $auctionId %}"
+          }
+        },
+        "UpdateExpression": "SET reserve = :myValueRef",
+        "ExpressionAttributeValues": {
+          ":myValueRef": {
+            "N": "{% $maxBid %}"
+          }
+        }
+      },
+      "Output": {
+        "message": "auction reserve closed"
+      },
+      "Next": "Pass"
+    },
+    "Pass": {
+      "Type": "Pass",
+      "End": true,
+      "Output": {
+        "status": "200 Success",
+        "message": "Auction closed successfully",
+        "auctionId": "{% $auctionId %}",
+        "bidAmt": "{% $bidAmt %}",
+        "winningUserId": "{% $winningUserId %}"
+      }
+    }
+  },
+  "QueryLanguage": "JSONata"
+}

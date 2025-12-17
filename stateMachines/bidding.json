@@ -1,0 +1,196 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "Init bidding vars",
+  "States": {
+    "Init bidding vars": {
+      "Type": "Pass",
+      "Assign": {
+        "auctionId": "{% $states.input.auctionId %}",
+        "bidAmt": "{% $states.input.bidAmt %}",
+        "userId": "{% $states.input.userId %}",
+        "date": "{% $states.input.date %}"
+      },
+      "Next": "getAuctionIdAndBidAmt"
+    },
+    "getAuctionIdAndBidAmt": {
+      "Type": "Task",
+      "Arguments": {
+        "TableName": "HW10-Bids",
+        "KeyConditionExpression": "auctionId = :a",
+        "ExpressionAttributeValues": {
+          ":a": {
+            "S": "{% $auctionId %}"
+          }
+        },
+        "ScanIndexForward": false
+      },
+      "Resource": "arn:aws:states:::aws-sdk:dynamodb:query",
+      "Next": "if there's any current bids",
+      "Output": {
+        "bids": "{% $states.result.Items[].bidAmt.N  %}",
+        "maxBid": "{% $states.result.Items[0].bidAmt.N  %}"
+      },
+      "Assign": {
+        "bids": "{% $states.result.Items[].bidAmt.N %}",
+        "maxNumBid": "{% $number($states.result.Items[0].bidAmt.N)  %}",
+        "maxBid": "{% $string($states.result.Items[0].bidAmt.N) %}"
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Comment": "if there's no bids",
+          "Next": "if there's any current bids",
+          "Assign": {
+            "maxNumBid": 0,
+            "maxBid": "0",
+            "bids": []
+          }
+        }
+      ]
+    },
+    "if there's any current bids": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Condition": "{% $bids = [] %}",
+          "Output": {
+            "message": "no current bids. let's place one "
+          },
+          "Next": "Place new bid"
+        }
+      ],
+      "Default": "Is the requested bid enough?"
+    },
+    "Is the requested bid enough?": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Next": "check the balance of user",
+          "Condition": "{% $bidAmt > $maxNumBid %}",
+          "Output": {
+            "message": "sufficient bid. Checking balance"
+          }
+        }
+      ],
+      "Default": "Insufficient Funds",
+      "Output": {
+        "message": "Insufficient funds"
+      }
+    },
+    "check the balance of user": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:getItem",
+      "Arguments": {
+        "TableName": "HW10-Users",
+        "Key": {
+          "userId": {
+            "S": "{% $userId %}"
+          }
+        }
+      },
+      "Next": "Is the balance enough",
+      "Output": {
+        "balance": "{% $states.result.Item.acctBalance.N %}"
+      },
+      "Assign": {
+        "balance": "{% $states.result.Item.acctBalance.N %}"
+      }
+    },
+    "Is the balance enough": {
+      "Type": "Choice",
+      "Default": "Not enough money in account",
+      "Output": {
+        "message": "Insufficient funds in balance"
+      },
+      "Choices": [
+        {
+          "Next": "Place new bid",
+          "Condition": "{% $number($balance)>= $bidAmt %}",
+          "Output": {
+            "message": "you have enough in your balance. placing bid now"
+          }
+        }
+      ]
+    },
+    "Not enough money in account": {
+      "Type": "Fail",
+      "Error": "Insufficient Funds in Balance",
+      "Cause": "You need more funds in your account Brodie"
+    },
+    "Insufficient Funds": {
+      "Type": "Fail",
+      "Error": "Bidding Error",
+      "Cause": "That requested bid amount is useless since it's less than the current."
+    },
+    "Place new bid": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:putItem",
+      "Arguments": {
+        "TableName": "HW10-Bids",
+        "Item": {
+          "auctionId": {
+            "S": "{% $auctionId %}"
+          },
+          "bidAmt": {
+            "N": "{% $string($bidAmt) %}"
+          },
+          "userId": {
+            "S": "{% $userId %}"
+          },
+          "date": {
+            "S": "{% $date %}"
+          }
+        }
+      },
+      "Next": "Update new balance",
+      "Output": {
+        "message": "Bid successfully placed"
+      }
+    },
+    "Update new balance": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Arguments": {
+        "TableName": "HW10-Users",
+        "Key": {
+          "userId": {
+            "S": "{% $userId %}"
+          }
+        },
+        "UpdateExpression": "SET acctBalance = acctBalance - :myValueRef",
+        "ExpressionAttributeValues": {
+          ":myValueRef": {
+            "N": "{% $string($bidAmt) %}"
+          }
+        }
+      },
+      "Output": {
+        "message": "balance successfully updated"
+      },
+      "Next": "SNS Publish"
+    },
+    "SNS Publish": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Arguments": {
+        "Message": "{% $states.input %}",
+        "TopicArn": "arn:aws:sns:us-east-1:211125636051:hw10-Bidding"
+      },
+      "Next": "Make the frontend look pwetty"
+    },
+    "Make the frontend look pwetty": {
+      "Type": "Pass",
+      "End": true,
+      "Output": {
+        "status": "200 Success",
+        "message": "Bid placed successfully",
+        "auctionId": "{% $auctionId %}",
+        "bidAmt": "{% $bidAmt %}",
+        "userId": "{% $userId %}"
+      }
+    }
+  },
+  "QueryLanguage": "JSONata"
+}
