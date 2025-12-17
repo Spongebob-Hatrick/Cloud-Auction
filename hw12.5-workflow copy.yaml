@@ -1,0 +1,63 @@
+on:
+  push:
+    branches:
+      -  feature-hw12  #now no longer main :0
+    
+env:
+  BUCKET_NAME: "hw10-11-auction" #this should be the bucket name on aws. I just mess with it lmao
+
+jobs:
+  deploy_to_s3:
+    name: Push spongeboi  #remember these don't matter
+    runs-on: self-hosted
+    steps:
+      
+    # I just took out the node stuff. Ngl alot of this got copied from hw3
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: setting Up Python3.11 
+        uses: actions/setup-python@v5
+        with:
+            python-version: "3.12"
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+          # role-session-name: LabRole
+
+      - name: Debug file tree #help me debug plz
+        run: ls -R
+
+      - name: zip up ALL the lambdurs
+        run: | 
+            zip -j create_auction.zip hw12/lambas/create_auction.py
+            zip -j create_user.zip hw12/lambas/create_user.py
+            zip -j get_auctions.zip hw12/lambas/get_aucitons.py
+            zip -j get_users.zip hw12/lambas/get_users.py
+            zip -j get_single_auction.zip hw12/lambas/get_single_auction.py
+            zip -j get_bids_for_auctionid.zip hw12/lambas/get_bids_for_auctionid.py
+
+
+
+
+
+
+      - name: Deploy to Lambda for proxy
+        run: |
+            aws lambda update-function-code --function-name hw10-create_auction --zip-file fileb://create_auction.zip
+            aws lambda update-function-code --function-name hw10-create_user --zip-file fileb://create_user.zip
+            aws lambda update-function-code --function-name hw10-get_auctions --zip-file fileb://get_auctions.zip
+            aws lambda update-function-code --function-name hw10-get_users --zip-file fileb://get_users.zip
+            aws lambda update-function-code --function-name hw10-get_single_auction --zip-file fileb://get_single_auction.zip
+            aws lambda update-function-code --function-name hw10-get_bids_for_auctionid --zip-file fileb://get_bids_for_auctionid.zip
+
+
+
+            
+
+             
